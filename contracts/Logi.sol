@@ -39,7 +39,7 @@ contract VotingHandler {
     function handleVotingResult(uint256 yay, uint256 nay) public;
 }
 
-contract LogiToken is ERC20, ERC677 {
+contract Logi is ERC20, ERC677 {
 
     struct VotingProposal {
         address handler; // contract address to handle voting results
@@ -72,7 +72,7 @@ contract LogiToken is ERC20, ERC677 {
     /**
      * @dev The Logi constructor sets the original `owner` of the contract to the sender account.
      */
-    function LogiToken() public {
+    function Logi() public {
         owner = msg.sender;
     }
 
