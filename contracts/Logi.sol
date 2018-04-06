@@ -1,4 +1,4 @@
-pragma solidity ^0.4.21;
+pragma solidity 0.4.21;
 
 /**
  * @title ERC20 Token Interface
@@ -89,7 +89,7 @@ contract Logi is ERC20, ERC677 {
      * @param _newOwner The address to transfer ownership to.
      */
     function transferOwnership(address _newOwner) public onlyOwner {
-        require(_newOwner != address(0));
+        require(_newOwner != none);
         owner = _newOwner;
     }
 
