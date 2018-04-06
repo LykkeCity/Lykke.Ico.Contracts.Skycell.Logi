@@ -32,13 +32,30 @@ contract ERC677Receiver {
     function tokenFallback(address _from, uint _value, bytes _data) public;
 }
 
+/**
+ * @title Handles voting result
+ */
+contract VotingHandler {
+    function handleVotingResult(uint256 yay, uint256 nay) public;
+}
+
 contract LogiToken is ERC20, ERC677 {
 
-    /** State Variables ***************************************************************/
+    struct VotingProposal {
+        address handler; // contract address to handle voting results
+        string descriptionUrl; // description document uri
+        bytes32 descriptionHash; // hash of the description document for checking
+        uint256 startTime;
+        uint256 yay; // has the same accuracy as token itself
+        uint256 nay; // has the same accuracy as token itself
+        mapping (address => bool) voted; // voting preformed flags
+    }
+
+    /** State Variables ****************************************************************/
 
     mapping(address => uint256) balances;
     mapping(address => uint256) lockups;
-    mapping(address => mapping(address => uint256)) internal allowed;
+    mapping(address => mapping(address => uint256)) allowed;
     address constant none = address(0x0);
     
     string public constant name = "LOGI";
@@ -47,8 +64,10 @@ contract LogiToken is ERC20, ERC677 {
     uint256 public constant maxSupply = 100 * 1000 * 1000 * 10**uint256(decimals); // use the smallest denomination unit to operate with token amounts
     bool public mintingDone = false;
     address public owner;
+    uint256 public constant votingDuration = 2 weeks;
+    VotingProposal public currentVoting;
 
-    /** Owning ************************************************************************/
+    /** Owning *************************************************************************/
 
     /**
      * @dev The Logi constructor sets the original `owner` of the contract to the sender account.
@@ -74,7 +93,7 @@ contract LogiToken is ERC20, ERC677 {
         owner = _newOwner;
     }
 
-    /** Minting & Locking ************************************************************/  
+    /** Minting & Locking **************************************************************/
 
     modifier mintingInProgress() {
         require(mintingDone == false);
@@ -118,7 +137,7 @@ contract LogiToken is ERC20, ERC677 {
      * @notice Locks participant balances for any action with corresponding amount of time.
      * @dev Sizes of `_investors` and `_lockups` must be the same.
      * @param _investors Array of participants addressess
-     * @param _lockups Array of timeouts (in seconds)
+     * @param _lockups Array of timestamps (UNIX-format in seconds) each of which points to the date and time of unlocking
      */
     function lock(address[] _investors, uint256[] _lockups) public mintingInProgress onlyOwner {
         require(_investors.length == _lockups.length);
@@ -127,9 +146,11 @@ contract LogiToken is ERC20, ERC677 {
             address investor = _investors[i]; 
             uint256 lockup = _lockups[i];
 
-            // TODO: any checks here? I.e. for any MAX lock-up?
+            // TODO: any requirements here? I.e. for any MAX lock-up?
 
             lockups[investor] = lockup;
+
+            // TODO: any assertions here?
 
             // TODO: do we need to emit event here?
         }
@@ -143,7 +164,7 @@ contract LogiToken is ERC20, ERC677 {
         mintingDone = true;
     }
 
-    /** ERC20 ***********************************************************************/
+    /** ERC20 **************************************************************************/
 
     /**
      * @notice Returns the account balance of another account with address `_owner`.
@@ -159,15 +180,10 @@ contract LogiToken is ERC20, ERC677 {
      * @param _value The amount of tokens to be transferred (in the smallest denomination unit)
      */
     function transfer(address _to, uint256 _value) public mintingFinished returns (bool) {
-        // prevent some common errors
-        require(_to != none);
-        require(_to != address(this));
-
-        // check lockups
-        require(lockups[msg.sender] == 0 || now >= lockups[msg.sender]);
-
-        // check balance
-        require(balances[msg.sender] >= _value);
+        require(_to != none); // destination is determined
+        require(_to != address(this)); // destination is not the current contract
+        require(lockups[msg.sender] == 0 || now >= lockups[msg.sender]); // funds are not locked
+        require(balances[msg.sender] >= _value); // balance is sufficient
 
         // transfer
         balances[msg.sender] -= _value;
@@ -181,17 +197,18 @@ contract LogiToken is ERC20, ERC677 {
         return true;
     }
 
+    /**
+     * @notice Transfers `_value` amount of tokens from address `_from` to address `_to`.
+     * @param _from The holder address
+     * @param _to The receiver address
+     * @param _value The amount of tokens to be transferred (in the smallest denomination unit)
+     */
     function transferFrom(address _from, address _to, uint256 _value) public mintingFinished returns (bool) {
-        // prevent some common errors
-        require(_to != none);
-        require(_to != address(this));
-
-        // check lockups
-        require(lockups[msg.sender] == 0 || now >= lockups[msg.sender]);
-
-        // check balance and allowance
-        require(allowed[_from][msg.sender] >= _value);
-        require(balances[_from] >= _value);
+        require(_to != none); // destination is determined
+        require(_to != address(this)); // destination is not the current contract
+        require(lockups[_from] == 0 || now >= lockups[_from]); // funds are not locked
+        require(allowed[_from][msg.sender] >= _value); // sender is approved to spend specified token amount
+        require(balances[_from] >= _value); // balance is sufficient
 
         allowed[_from][msg.sender] -= _value;
         balances[_from] -= _value;
@@ -226,5 +243,118 @@ contract LogiToken is ERC20, ERC677 {
      */
     function allowance(address _owner, address _spender) public view returns (uint256) {
         return allowed[_owner][_spender];
+    }
+
+    /** ERC677 *************************************************************************/
+
+    function transferAndCall(address _to, uint _value, bytes _data) public mintingFinished returns (bool) {
+        require(transfer(_to, _value));
+
+        // call receiver
+        if (isContract(_to)) {
+            ERC677Receiver(_to).tokenFallback(msg.sender, _value, _data);
+        }
+
+        emit Transfer(msg.sender, _to, _value, _data);
+
+        return true;
+    }
+
+    function isContract(address _addr) private view returns (bool) {
+        uint size;
+        assembly {
+            size := extcodesize(_addr)
+        }
+        return size > 0;
+    }
+
+    /** Voting *************************************************************************/
+
+    /**
+     * @notice Raised when a new voting has been started 
+     */
+    event VotingStarted(address _handler, string _url, bytes32 _hash);
+
+    /**
+     * @notice Raised when a vote has been casted
+     */
+    event Voted(address _who, bool _option, uint256 _votes);
+
+    /**
+     * @notice Raised when a voting has been completed and result has been processed 
+     */
+    event VotingCompleted(uint256 _yay, uint256 _nay);
+
+    /**
+     * @notice Begins new voting
+     * @dev There must not be any other active voting - can not vote in parallel.
+     * @param _handler The address of contract to handle the voting result
+     * @param _url URL of document with description of voting target
+     * @param _hash Hash of the description document for verification
+     */
+    function startVoting(address _handler, string _url, bytes32 _hash) public mintingFinished onlyOwner {
+        require(isContract(_handler)); // handler is able to handle voting result
+        require(currentVoting.handler == none); // no active voting
+        require(_hash != bytes32(0)); // the description doscument hash is not empty
+        require(bytes(_url).length > 0); // the description URL is not empty
+
+        currentVoting = VotingProposal(_handler, _url, _hash, now, 0, 0);
+
+        emit VotingStarted(_handler, _url, _hash);
+    }
+
+    /**
+     * @notice Accepts vote for current proposal
+     * @param _vote true for YES or FALSE for NO
+     * @return Returns vote amount in the smallest denomination unit
+     */
+    function vote(bool _vote) public returns (uint256) {
+        require(currentVoting.handler != none); // voting is active
+        require(currentVoting.startTime <= now && currentVoting.startTime + votingDuration > now); // voting is in progress
+        require(currentVoting.voted[msg.sender] == false); // has not voted yet
+        require(lockups[msg.sender] == 0 || now >= lockups[msg.sender]); // funds are not locked - can vote
+
+        uint256 votes = balances[msg.sender];
+
+        if(_vote) {
+            currentVoting.yay += votes;
+        }
+        else {
+            currentVoting.nay += votes;
+        }
+
+        // setup voting flag for participant
+        currentVoting.voted[msg.sender] == true;
+
+        // check overflows/underflows
+        assert(currentVoting.yay >= currentVoting.yay - votes);
+        assert(currentVoting.nay >= currentVoting.nay - votes);        
+
+        emit Voted(msg.sender, _vote, votes);
+
+        return votes;
+    }
+
+    /**
+     * @notice Completes voting and calls voting result handler for additional action
+     */
+    function completeVoting() public onlyOwner {
+        require(currentVoting.handler != none); // voting is active
+        require(currentVoting.startTime + votingDuration < now); // voting is finished
+
+        // currently a simple approach with calling external contract is used to handle voting result (similar to ERC677)
+        // but it is rather useless in case of manipulating data after voting
+        // consider using "delegatecall" in case if any data modification is required
+        // be awared of security risks of "delegatecall" - 
+        // see https://medium.com/loom-network/how-to-secure-your-smart-contracts-6-solidity-vulnerabilities-and-how-to-avoid-them-part-1-c33048d4d17d
+
+        // call voting result handler
+        if (isContract(currentVoting.handler)) {
+            VotingHandler(currentVoting.handler).handleVotingResult(currentVoting.yay, currentVoting.nay);
+        }
+
+        emit VotingCompleted(currentVoting.yay, currentVoting.nay);
+
+        delete currentVoting;
     }
 }
