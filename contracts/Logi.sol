@@ -48,7 +48,8 @@ contract Logi is ERC20, ERC677 {
         uint256 startTime;
         uint256 yay; // has the same accuracy as token itself
         uint256 nay; // has the same accuracy as token itself
-        mapping (address => bool) voted; // voting preformed flags
+        mapping (address => uint256) locks; // voting amounts fixing flags
+        mapping (address => uint256) votes; // voting amounts
     }
 
     /** State Variables ****************************************************************/
@@ -185,6 +186,10 @@ contract Logi is ERC20, ERC677 {
         require(lockups[msg.sender] == 0 || now >= lockups[msg.sender]); // funds are not locked
         require(balances[msg.sender] >= _value); // balance is sufficient
 
+        // fix votes if any voting is running
+        fixVotes(msg.sender);
+        fixVotes(_to);
+
         // transfer
         balances[msg.sender] -= _value;
         balances[_to] += _value;
@@ -210,6 +215,11 @@ contract Logi is ERC20, ERC677 {
         require(allowed[_from][msg.sender] >= _value); // sender is approved to spend specified token amount
         require(balances[_from] >= _value); // balance is sufficient
 
+        // fix votes if any voting is running
+        fixVotes(_from);
+        fixVotes(_to);
+
+        // transfer
         allowed[_from][msg.sender] -= _value;
         balances[_from] -= _value;
         balances[_to] += _value;
@@ -311,10 +321,9 @@ contract Logi is ERC20, ERC677 {
     function vote(bool _vote) public returns (uint256) {
         require(currentVoting.handler != none); // voting is active
         require(currentVoting.startTime <= now && currentVoting.startTime + votingDuration > now); // voting is in progress
-        require(currentVoting.voted[msg.sender] == false); // has not voted yet
         require(lockups[msg.sender] == 0 || now >= lockups[msg.sender]); // funds are not locked - can vote
 
-        uint256 votes = balances[msg.sender];
+        uint256 votes = fixVotes(msg.sender);
 
         if(_vote) {
             currentVoting.yay += votes;
@@ -323,12 +332,13 @@ contract Logi is ERC20, ERC677 {
             currentVoting.nay += votes;
         }
 
-        // setup voting flag for participant
-        currentVoting.voted[msg.sender] == true;
+        // decrease available votes
+        currentVoting.votes[msg.sender] -= votes;
 
         // check overflows/underflows
         assert(currentVoting.yay >= currentVoting.yay - votes);
-        assert(currentVoting.nay >= currentVoting.nay - votes);        
+        assert(currentVoting.nay >= currentVoting.nay - votes);   
+        assert(currentVoting.votes[msg.sender] <= currentVoting.votes[msg.sender] + votes);                     
 
         emit Voted(msg.sender, _vote, votes);
 
@@ -356,5 +366,14 @@ contract Logi is ERC20, ERC677 {
         emit VotingCompleted(currentVoting.yay, currentVoting.nay);
 
         delete currentVoting;
+    }
+
+    function fixVotes(address _addr) private returns (uint256) {
+        if (currentVoting.locks[_addr] < currentVoting.startTime) {
+            currentVoting.locks[_addr] = currentVoting.startTime;
+            currentVoting.votes[_addr] = balances[_addr];
+        }
+
+        return currentVoting.votes[_addr];
     }
 }
