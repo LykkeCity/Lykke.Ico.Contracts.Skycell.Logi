@@ -183,7 +183,6 @@ contract Logi is ERC20, ERC677 {
     function transfer(address _to, uint256 _value) public mintingFinished returns (bool) {
         require(_to != none); // destination is determined
         require(_to != address(this)); // destination is not the current contract
-        require(lockups[msg.sender] == 0 || now >= lockups[msg.sender]); // funds are not locked
         require(balances[msg.sender] >= _value); // balance is sufficient
 
         // fix votes if any voting is running
@@ -211,7 +210,6 @@ contract Logi is ERC20, ERC677 {
     function transferFrom(address _from, address _to, uint256 _value) public mintingFinished returns (bool) {
         require(_to != none); // destination is determined
         require(_to != address(this)); // destination is not the current contract
-        require(lockups[_from] == 0 || now >= lockups[_from]); // funds are not locked
         require(allowed[_from][msg.sender] >= _value); // sender is approved to spend specified token amount
         require(balances[_from] >= _value); // balance is sufficient
 
@@ -260,12 +258,12 @@ contract Logi is ERC20, ERC677 {
     function transferAndCall(address _to, uint _value, bytes _data) public mintingFinished returns (bool) {
         require(transfer(_to, _value));
 
+        emit Transfer(msg.sender, _to, _value, _data);
+
         // call receiver
         if (isContract(_to)) {
             ERC677Receiver(_to).tokenFallback(msg.sender, _value, _data);
         }
-
-        emit Transfer(msg.sender, _to, _value, _data);
 
         return true;
     }
@@ -321,7 +319,7 @@ contract Logi is ERC20, ERC677 {
     function vote(bool _vote) public returns (uint256) {
         require(currentVoting.handler != none); // voting is active
         require(currentVoting.startTime <= now && currentVoting.startTime + votingDuration > now); // voting is in progress
-        require(lockups[msg.sender] == 0 || now >= lockups[msg.sender]); // funds are not locked - can vote
+        require(now >= lockups[msg.sender]); // not locked - can vote
 
         uint256 votes = fixVotes(msg.sender);
 
@@ -368,6 +366,9 @@ contract Logi is ERC20, ERC677 {
         delete currentVoting;
     }
 
+    /**
+     * @dev Fixes amount of votes for `_addr` on start time of current voting (if any). Must be called before voting or balance change of `_addr`.
+     */
     function fixVotes(address _addr) private returns (uint256) {
         if (currentVoting.locks[_addr] < currentVoting.startTime) {
             currentVoting.locks[_addr] = currentVoting.startTime;
