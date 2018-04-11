@@ -1,4 +1,6 @@
-var _helpers = require('./helpers');
+/**
+ * This is adopted to Logi (MiniMe) version of https://github.com/CryptoverseRocks/token-test-suite
+ */
 
 var expect = require('chai').use(require('chai-bignumber')(web3.BigNumber)).expect;
 
@@ -28,10 +30,6 @@ contract('Logi', function(accounts) {
     function tokens(amount) {
         return new web3.BigNumber(amount).shift(18);
     };
-
-    function when(name) {
-        return 'when (' + name + ')';
-    }
 
     beforeEach(async function() {
         contract = await Logi.new();
@@ -144,7 +142,7 @@ contract('Logi', function(accounts) {
 
                     it('should return false when updating approving without "zero step"', async function() {
                         await contract.approve(to, tokens(2), { from: from });
-                        await (0, _helpers.expectRevertOrFail)(contract.approve(to, tokens(2), { from: from }));
+                        await expectRevertOrFail(contract.approve(to, tokens(2), { from: from }));
                     });
 
                     it('should update allowance accordingly', async function() {
@@ -170,23 +168,17 @@ contract('Logi', function(accounts) {
                         await testApprovalEvent(from, to, 0);
                     });
 
-                    it('should fire Approval even when allowance did not change', async function() {
-                        // even 0 -> 0 should fire Approval event
+                    it('should fire Approval when allowance was changed from 0 to 0', async function() {
                         await testApprovalEvent(from, to, 0);
-
-                        await contract.approve(to, tokens(3), { from: from });
-                        await testApprovalEvent(from, to, tokens(3));
                     });
                 });
             }
 
             async function testApprovalEvent(from, to, amount) {
                 var result = await contract.approve(to, amount, { from: from });
-                var log = result.logs[0];
-                assert.equal(log.event, 'Approval');
-                assert.equal(log.args.owner, from);
-                assert.equal(log.args.spender, to);
-                expect(log.args.value).to.be.bignumber.equal(amount);
+                var log = result.logs.find(log => log.event == "Approval" && log.args._owner == from && log.args._spender == to);
+                assert(!!log);
+                expect(log.args._amount).to.be.bignumber.equal(amount);
             }
         });
 
@@ -212,15 +204,15 @@ contract('Logi', function(accounts) {
                     });
 
                     it('should revert when trying to transfer something while having nothing', async function() {
-                        await (0, _helpers.expectRevertOrFail)(contract.transfer(to, tokens(1), { from: from }));
+                        await expectRevertOrFail(contract.transfer(to, tokens(1), { from: from }));
                     });
 
                     it('should revert when trying to transfer more than balance', async function() {
                         await credit(from, tokens(3));
-                        await (0, _helpers.expectRevertOrFail)(contract.transfer(to, tokens(4), { from: from }));
+                        await expectRevertOrFail(contract.transfer(to, tokens(4), { from: from }));
 
                         await contract.transfer('0x1', tokens(1), { from: from });
-                        await (0, _helpers.expectRevertOrFail)(contract.transfer(to, tokens(3), { from: from }));
+                        await expectRevertOrFail(contract.transfer(to, tokens(3), { from: from }));
                     });
 
                     it('should not affect totalSupply', async function() {
@@ -275,11 +267,9 @@ contract('Logi', function(accounts) {
                 }
 
                 var result = await contract.transfer(to, amount, { from: from });
-                var log = result.logs[0];
-                assert.equal(log.event, 'Transfer');
-                assert.equal(log.args.from, from);
-                assert.equal(log.args.to, to);
-                expect(log.args.value).to.be.bignumber.equal(amount);
+                var log = result.logs.find(log => log.event == "Transfer" && log.args._from == from && log.args._to == to);
+                assert(!!log);
+                expect(log.args._amount).to.be.bignumber.equal(amount);
             }
         });
 
@@ -291,12 +281,8 @@ contract('Logi', function(accounts) {
 
             it('should revert when trying to transfer while not allowed at all', async function() {
                 await credit(alice, tokens(3));
-                await (0, _helpers.expectRevertOrFail)(contract.transferFrom(alice, bob, tokens(1), { from: bob }));
-                await (0, _helpers.expectRevertOrFail)(contract.transferFrom(alice, charles, tokens(1), { from: bob }));
-            });
-
-            it('should fire Transfer event when transferring amount of 0 and sender is not approved', async function() {
-                await testTransferEvent(alice, bob, bob, 0);
+                await expectRevertOrFail(contract.transferFrom(alice, bob, tokens(1), { from: bob }));
+                await expectRevertOrFail(contract.transferFrom(alice, charles, tokens(1), { from: bob }));
             });
 
             function describeIt(name, from, via, to) {
@@ -326,17 +312,17 @@ contract('Logi', function(accounts) {
                     });
 
                     it('should revert when trying to transfer something while _from having nothing', async function() {
-                        await (0, _helpers.expectRevertOrFail)(contract.transferFrom(from, to, tokens(1), { from: via }));
+                        await expectRevertOrFail(contract.transferFrom(from, to, tokens(1), { from: via }));
                     });
 
                     it('should revert when trying to transfer more than balance of _from', async function() {
                         await credit(from, tokens(2));
-                        await (0, _helpers.expectRevertOrFail)(contract.transferFrom(from, to, tokens(3), { from: via }));
+                        await expectRevertOrFail(contract.transferFrom(from, to, tokens(3), { from: via }));
                     });
 
                     it('should revert when trying to transfer more than allowed', async function() {
                         await credit(from, tokens(4));
-                        await (0, _helpers.expectRevertOrFail)(contract.transferFrom(from, to, tokens(4), { from: via }));
+                        await expectRevertOrFail(contract.transferFrom(from, to, tokens(4), { from: via }));
                     });
 
                     it('should not affect totalSupply', async function() {
@@ -428,11 +414,9 @@ contract('Logi', function(accounts) {
                 }
 
                 var result = await contract.transferFrom(from, to, amount, { from: via });
-                var log = result.logs[0];
-                assert.equal(log.event, 'Transfer');
-                assert.equal(log.args.from, from);
-                assert.equal(log.args.to, to);
-                expect(log.args.value).to.be.bignumber.equal(amount);
+                var log = result.logs.find(log => log.event == "Transfer" && log.args._from == from && log.args._to == to);
+                assert(!!log);
+                expect(log.args._amount).to.be.bignumber.equal(amount);
             }
         });
     });
@@ -444,4 +428,63 @@ contract('Logi', function(accounts) {
 */
 function when(name) {
     return 'when (' + name + ')';
+}
+
+/**
+ * Converts given value to BigNumber object if it is number or string. Otherwise defaultValue is
+ * returned in case given value is not truthy.
+ *
+ * @param {number|string|BigNumber|null} number
+ * @param {number|string|BigNumber|null} [defaultValue]
+ * @returns {BigNumber|null}
+ */
+function toBigNumber(number) {
+    var defaultValue = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
+
+    if (typeof number === 'string' || typeof number === 'number') {
+        return new web3.BigNumber(number);
+    } else if (number) {
+        return number;
+    } else if (defaultValue == null) {
+        return null;
+    } else {
+        return new web3.BigNumber(defaultValue);
+    }
+}
+
+/**
+ * Asserts that given promise will throw because of revert().
+ * @param {Promise} promise
+ */
+async function expectRevert(promise) {
+    await expectError(promise, ['revert']);
+}
+
+/**
+ * Asserts that given promise will throw because of revert() or failed assertion.
+ * @param {Promise} promise
+ */
+async function expectRevertOrFail(promise) {
+    await expectError(promise, ['revert', 'invalid opcode']);
+}
+
+/**
+ * Asserts that given promise will throw and that thrown message will contain one of the given
+ * search strings.
+ *
+ * @param {Promise} promise The promise expecting to throw.
+ * @param {string[]} messages List of expected thrown message search strings.
+ */
+async function expectError(promise, messages) {
+    try {
+        await promise;
+    } catch (error) {
+        for (var i = 0; i < messages.length; i++) {
+            if (error.message.search(messages[i]) >= 0) {
+                return;
+            }
+        }
+        assert.fail("Expected revert, got '" + error + "' instead.");
+    }
+    assert.fail('Expected revert not received.');
 }
